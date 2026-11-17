@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -19,6 +19,17 @@
 .pwa-install span{display:block;color:rgba(255,255,255,.72);line-height:1.5}
 .pwa-install .pwa-close{flex:none;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);color:#fff;font-size:15px;line-height:1}
 .pwa-install .btn{flex:none;min-height:38px}
+.pwa-sheet{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center;font-family:var(--font-sans)}
+.pwa-sheet[hidden]{display:none}
+.pwa-sheet-mask{position:absolute;inset:0;background:rgba(24,20,15,.46)}
+.pwa-sheet-card{position:relative;width:100%;max-width:480px;margin:0 10px calc(12px + env(safe-area-inset-bottom,0px));padding:20px 18px 16px;border-radius:22px;background:#fffdf8;box-shadow:0 -10px 40px rgba(33,31,27,.24);animation:pwaSheetUp .22s ease}
+@keyframes pwaSheetUp{from{transform:translateY(18px);opacity:.4}to{transform:translateY(0);opacity:1}}
+.pwa-sheet-card h3{margin:0 0 12px;font-size:16px;letter-spacing:-.01em;color:#211f1b}
+.pwa-steps{margin:0 0 12px;padding-left:19px;color:#49453e;font-size:12.5px;line-height:1.85}
+.pwa-steps li{margin-bottom:2px}
+.pwa-url{display:block;padding:9px 11px;border-radius:10px;background:#f3eee4;border:1px solid rgba(46,39,29,.11);color:#49453e;font-size:11.5px;line-height:1.5;word-break:break-all;user-select:all}
+.pwa-sheet-actions{display:flex;gap:8px;margin-top:14px}
+.pwa-sheet-actions .btn{flex:1;min-height:42px}
 </style>
 
 <style>
@@ -7316,48 +7327,122 @@ document.addEventListener('DOMContentLoaded', boot);
     <strong>安装「衣橱灵感」到桌面</strong>
     <span id="pwaHint">像 App 一样打开，首次联网后可离线使用</span>
   </div>
-  <button class="btn btn-accent" id="pwaInstallBtn" hidden>安装</button>
+  <button class="btn btn-accent" id="pwaInstallBtn">安装</button>
   <button class="pwa-close" id="pwaClose" aria-label="关闭">×</button>
 </div>
+
+<div class="pwa-sheet" id="pwaSheet" hidden>
+  <div class="pwa-sheet-mask" data-pwa-close></div>
+  <div class="pwa-sheet-card">
+    <h3 id="pwaSheetTitle">如何安装到桌面</h3>
+    <ol class="pwa-steps" id="pwaSheetSteps">
+      <li>用系统 <strong>Chrome</strong> 打开下面的网址</li>
+      <li>点右上角 <strong>⋮</strong> 菜单</li>
+      <li>选「安装应用」或「添加到主屏幕」</li>
+    </ol>
+    <code class="pwa-url" id="pwaSheetUrl"></code>
+    <div class="pwa-sheet-actions">
+      <button class="btn btn-primary btn-block" id="pwaCopy">复制网址</button>
+      <button class="btn btn-ghost btn-block" data-pwa-close>关闭</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
-  try{
-    var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
-    var box = document.getElementById('pwaInstall');
-    var hint = document.getElementById('pwaHint');
-    var btn = document.getElementById('pwaInstallBtn');
-    var ua = navigator.userAgent || '';
-    var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    var dismissed = false;
-    try { dismissed = localStorage.getItem('ootd_pwa_dismissed') === '1'; } catch(e){}
-    if(!box) return;
-    document.getElementById('pwaClose').addEventListener('click', function(){
-      box.hidden = true;
-      try { localStorage.setItem('ootd_pwa_dismissed','1'); } catch(e){}
-    });
-    if(isStandalone || dismissed) return;
-    var deferred = null;
-    window.addEventListener('beforeinstallprompt', function(e){
-      e.preventDefault();
-      deferred = e;
-      btn.hidden = false;
-      hint.textContent = '像 App 一样打开，桌面图标直达，离线也能用';
-      box.hidden = false;
-    });
-    btn.addEventListener('click', function(){
-      if(!deferred) return;
-      deferred.prompt();
-      deferred.userChoice && deferred.userChoice.then(function(){ deferred = null; box.hidden = true; });
-    });
-    if(isIOS){
-      hint.textContent = 'Safari → 分享 → 添加到主屏幕';
-      box.hidden = false;
+  var box = document.getElementById('pwaInstall');
+  if(!box) return;
+  var hint = document.getElementById('pwaHint');
+  var btn = document.getElementById('pwaInstallBtn');
+  var closeBtn = document.getElementById('pwaClose');
+  var sheet = document.getElementById('pwaSheet');
+  var sheetTitle = document.getElementById('pwaSheetTitle');
+  var sheetUrl = document.getElementById('pwaSheetUrl');
+  var copyBtn = document.getElementById('pwaCopy');
+  var ua = navigator.userAgent || '';
+  var inApp = /MicroMessenger|MQQBrowser|QQ\/|UCBrowser|Weibo|AlipayClient|DingTalk/i.test(ua);
+  var notChromium = !/Chrome|Chromium|CriOS|Edg\//i.test(ua) && (/Firefox|FxiOS/i.test(ua) || /Safari\//.test(ua));
+  var needChrome = inApp || notChromium;
+  var standalone = false;
+  try{ standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }catch(e){}
+  var pageUrl = location.origin + location.pathname;
+
+  function hideBanner(){ box.hidden = true; }
+  function showSheet(title){
+    sheetTitle.textContent = title || '如何安装到桌面';
+    sheetUrl.textContent = pageUrl;
+    sheet.hidden = false;
+  }
+  function closeSheet(){ sheet.hidden = true; }
+  document.querySelectorAll('[data-pwa-close]').forEach(function(el){ el.addEventListener('click', closeSheet); });
+
+  copyBtn.addEventListener('click', function(){
+    var done = function(){ copyBtn.textContent = '已复制'; setTimeout(function(){ copyBtn.textContent = '复制网址'; }, 1600); };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(pageUrl).then(done).catch(function(){ fallbackCopy(); });
+    } else { fallbackCopy(); }
+    function fallbackCopy(){
+      var t = document.createElement('textarea');
+      t.value = pageUrl; t.style.position = 'fixed'; t.style.opacity = '0';
+      document.body.appendChild(t); t.select();
+      try{ document.execCommand('copy'); done(); }catch(e){ copyBtn.textContent = '长按上方网址复制'; }
+      document.body.removeChild(t);
+    }
+  });
+
+  if(standalone){ hideBanner(); return; }
+
+  var dismissed = false;
+  try{ dismissed = sessionStorage.getItem('ootd_pwa_dismissed') === '1'; }catch(e){}
+  if(dismissed){ hideBanner(); } else {
+    box.hidden = false;
+    if(inApp){
+      hint.textContent = '当前是微信/QQ 等内置浏览器，无法直接安装';
+      btn.textContent = '如何安装';
+    } else if(needChrome){
+      hint.textContent = '当前浏览器不支持直接安装，请改用系统 Chrome';
+      btn.textContent = '如何安装';
+    } else {
+      hint.textContent = '点「安装」或浏览器菜单 → 添加到主屏幕 / 安装应用';
+    }
+  }
+  closeBtn.addEventListener('click', function(){
+    hideBanner();
+    try{ sessionStorage.setItem('ootd_pwa_dismissed','1'); }catch(e){}
+  });
+
+  var deferred = null;
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault();
+    deferred = e;
+    btn.textContent = '安装';
+    hint.textContent = '像 App 一样打开，桌面图标直达，离线也能用';
+    if(box.hidden){ box.hidden = false; }
+  });
+  window.addEventListener('appinstalled', function(){ hideBanner(); closeSheet(); });
+
+  btn.addEventListener('click', function(){
+    if(needChrome){
+      showSheet('请在系统 Chrome 中打开');
       return;
     }
-    setTimeout(function(){
-      if(box.hidden){ hint.textContent = '浏览器菜单 → 添加到主屏幕 / 安装应用'; box.hidden = false; }
-    }, 6000);
-  }catch(e){}
+    if(!deferred){
+      showSheet('可手动添加：Chrome 菜单 → 安装应用');
+      return;
+    }
+    var ev = deferred;
+    deferred = null;
+    try { ev.prompt(); } catch(err){ showSheet('安装弹窗不可用，可手动添加'); return; }
+    var choice = ev.userChoice;
+    if(choice && choice.then){
+      choice.then(function(res){
+        if(res && res.outcome === 'dismissed'){ showSheet('已取消安装，可手动添加'); }
+        else { hideBanner(); }
+      }).catch(function(){ showSheet('安装未完成，可手动添加'); });
+    } else {
+      showSheet('若未出现安装弹窗，可手动添加');
+    }
+  });
 })();
 if('serviceWorker' in navigator && location.protocol !== 'file:'){
   window.addEventListener('load', function(){
@@ -7365,6 +7450,6 @@ if('serviceWorker' in navigator && location.protocol !== 'file:'){
   });
 }
 </script>
+
 </body>
 </html>
-
